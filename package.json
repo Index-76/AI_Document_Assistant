@@ -1,0 +1,18 @@
+{
+  "name": "ai_document_assistant_project",
+  "version": "1.0.0",
+  "description": "A cross-platform AI document assistant project with Node.js backend",
+  "scripts": {
+    "install": "cd backend && npm install",
+    "start": "cd backend && npm start",
+    "dev": "cd backend && npm run dev",
+    "test": "cd backend && npm test"
+  },
+  "keywords": [
+    "nodejs",
+    "ai",
+    "document-assistant"
+  ],
+  "author": "",
+  "license": "ISC"
+}
