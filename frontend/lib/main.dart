@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/services.dart' show rootBundle;
+import 'utils/logger.dart';
 
 // 配置管理类
 class Config {
@@ -16,7 +17,7 @@ class Config {
       Map<String, dynamic> config = json.decode(data);
       backendUrl = config['backendUrl'] ?? backendUrl;
     } catch (e) {
-      print('无法加载配置文件，使用默认后端地址: $e');
+      logger.e('无法加载配置文件，使用默认后端地址', e);
     }
   }
 }
@@ -24,6 +25,7 @@ class Config {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized(); // 确保在加载配置前初始化
   await Config.loadConfig(); // 加载配置
+  logger.i('应用启动，配置加载完成');
   runApp(const MyApp());
 }
 
@@ -60,6 +62,7 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
+    logger.i('初始化页面');
     _checkBackendConnection();
   }
 
@@ -72,22 +75,26 @@ class _MyHomePageState extends State<MyHomePage> {
     try {
       // 尝试连接到后端
       String backendUrl = getBackendUrl();
+      logger.i('尝试连接到后端: $backendUrl');
       final response = await http.get(
         Uri.parse(backendUrl), // 后端API地址
       );
       
       if (response.statusCode == 200) {
+        logger.i('后端连接成功');
         setState(() {
           _backendStatus = '后端连接: 已连接';
           _statusColor = Colors.green;
         });
       } else {
+        logger.w('后端连接失败，状态码: ${response.statusCode}');
         setState(() {
           _backendStatus = '后端连接: 连接失败';
           _statusColor = Colors.red;
         });
       }
     } catch (e) {
+      logger.e('后端连接异常', e);
       setState(() {
         _backendStatus = '后端连接: 连接失败';
         _statusColor = Colors.red;
@@ -96,6 +103,7 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _incrementCounter() {
+    logger.d('按钮被点击，当前计数: $_counter');
     setState(() {
       _counter++;
     });
@@ -103,6 +111,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    logger.v('构建页面');
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.title),
