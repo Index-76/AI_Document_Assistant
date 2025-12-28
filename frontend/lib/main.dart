@@ -1,8 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/services.dart' show rootBundle;
 
-void main() {
+// 配置管理类
+class Config {
+  static String backendUrl = 'http://localhost:2070/'; // 默认值
+  
+  // 从配置文件加载后端URL
+  static Future<void> loadConfig() async {
+    try {
+      // 尝试从assets中加载config.json
+      String data = await rootBundle.loadString('assets/config/config.json');
+      Map<String, dynamic> config = json.decode(data);
+      backendUrl = config['backendUrl'] ?? backendUrl;
+    } catch (e) {
+      print('无法加载配置文件，使用默认后端地址: $e');
+    }
+  }
+}
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized(); // 确保在加载配置前初始化
+  await Config.loadConfig(); // 加载配置
   runApp(const MyApp());
 }
 
@@ -42,21 +63,9 @@ class _MyHomePageState extends State<MyHomePage> {
     _checkBackendConnection();
   }
 
-  // 获取后端API的基础URL - 所有端统一访问服务器的2070端口
+  // 获取后端API的基础URL - 现在从配置文件获取
   String getBackendUrl() {
-    // 默认使用当前主机的2070端口
-    String currentHost = Uri.base.host;
-    String scheme = Uri.base.scheme;
-    
-    // 如果当前不是localhost，说明在远程服务器上运行，使用当前主机的2070端口
-    if (currentHost.isNotEmpty && currentHost != 'localhost' && currentHost != '127.0.0.1') {
-      return '$scheme://$currentHost:2070/';
-    } else {
-      // 在开发环境下，通常后端运行在localhost:2070
-      // 为了实际部署，我们仍然使用当前主机的2070端口
-      // 用户需要确保在访问应用时使用正确的服务器地址
-      return 'http://localhost:2070/';
-    }
+    return Config.backendUrl;
   }
 
   Future<void> _checkBackendConnection() async {

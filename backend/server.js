@@ -5,18 +5,42 @@ const pdfParse = require("pdf-parse");
 const { Configuration, OpenAIApi } = require("openai");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 2070; // 修改默认端口为2070
 
+// 配置CORS，允许来自任何源的请求
+app.use(cors({
+  origin: '*', // 允许所有源 - 在生产环境中应更具体
+  credentials: true
+}));
+
 // Middleware
-app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-// Serve static files from the 'frontend/build/web' directory
-app.use(express.static(path.join(__dirname, "../frontend/build/web")));
+// 定义前端构建目录路径
+const frontendBuildPath = path.join(__dirname, "../frontend/build/web");
+
+// Log the path for debugging
+console.log("Serving static files from:", frontendBuildPath);
+console.log("Index file exists:", fs.existsSync(path.join(frontendBuildPath, 'index.html')));
+
+// 静态文件服务，添加适当的头部信息
+app.use(express.static(frontendBuildPath, {
+  setHeaders: (res, filePath) => {
+    // 为字体文件设置适当的CORS头部
+    if (path.extname(filePath) === '.json' || 
+        path.extname(filePath) === '.woff' || 
+        path.extname(filePath) === '.woff2' || 
+        path.extname(filePath) === '.ttf' || 
+        path.extname(filePath) === '.otf') {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+  }
+}));
 
 // Multer setup for file uploads
 const storage = multer.diskStorage({
@@ -40,17 +64,7 @@ const configuration = new Configuration({
 });
 const openai = new OpenAIApi(configuration);
 
-// Routes
-// 为所有非API路由提供前端index.html，以支持SPA路由
-app.get(/\/(?!api)/, (req, res) => {
-  const indexPath = path.join(__dirname, "../frontend/build/web/index.html");
-  if (fs.existsSync(indexPath)) {
-    res.sendFile(indexPath);
-  } else {
-    res.send("AI Document Assistant API");
-  }
-});
-
+// Handle API routes
 // Upload document endpoint
 app.post("/api/upload", upload.single("document"), async (req, res) => {
   try {
@@ -107,10 +121,52 @@ app.post("/api/ask", async (req, res) => {
   }
 });
 
+// Special handler for index.html - serve the index file directly
+app.get('/index.html', (req, res) => {
+  const indexPath = path.join(frontendBuildPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    console.log("Serving index.html directly");
+    res.sendFile(indexPath);
+  } else {
+    console.log("index.html file does not exist at:", indexPath);
+    res.status(404).send("Frontend build not found. Please run 'flutter build web'");
+  }
+});
+
+// Catch-all handler for all non-API routes - serve the frontend
+// This ensures that Flutter's routing works properly
+app.get(/^(?!\/api)/, (req, res) => {
+  const indexPath = path.join(frontendBuildPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    console.log("Serving index.html for route:", req.url);
+    res.sendFile(indexPath);
+  } else {
+    console.log("index.html file does not exist at:", indexPath);
+    res.status(404).send("Frontend build not found. Please run 'flutter build web'");
+  }
+});
+
 // Start server
 const server = app.listen(PORT, "0.0.0.0", () => {
+  const interfaces = os.networkInterfaces();
+  let ipv4Address = '';
+  
+  // Find the first available IPv4 address
+  Object.keys(interfaces).forEach(interfaceName => {
+    if (interfaceName.startsWith('eth') || interfaceName.startsWith('wlan')) {
+      interfaces[interfaceName].forEach(iface => {
+        if (!iface.internal && iface.family === 'IPv4') {
+          ipv4Address = iface.address;
+        }
+      });
+    }
+  });
+  
   console.log(`Server running on port ${PORT}`);
-  console.log(`API and Web App available on http://localhost:${PORT}`);
+  if (ipv4Address) {
+    console.log(`API and Web App available on http://${ipv4Address}:${PORT}`);
+  }
+  console.log(`API and Web App also available on http://localhost:${PORT}`);
 });
 
 module.exports = app;
