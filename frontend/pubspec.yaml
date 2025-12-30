@@ -26,6 +26,14 @@ dependencies:
   cupertino_icons: ^1.0.2
   http: ^0.13.5
   logging: ^1.2.0
+  dio: ^5.0.0
+  bitsdojo_window: ^0.1.5
+  desktop_drop: ^0.4.4
+  flutter_markdown_selectionarea: ^0.6.17+1
+  url_launcher: ^6.1.14
+  file_picker: ^5.2.0
+  shared_preferences: ^2.0.15
+  markdown: ^7.0.0
 
 dev_dependencies:
   flutter_test:
@@ -38,7 +46,7 @@ dev_dependencies:
 # The following section is specific to Flutter packages.
 flutter:
 
-  # The following line ensures that the Material Icons font is
+  # The following line ensures that the material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
@@ -62,7 +70,7 @@ flutter:
   #   - family: Schyler
   #     fonts:
   #       - asset: fonts/Schyler-Regular.ttf
-  #       - asset: fonts/Schyler-Italic.ttf
+  #       - fonts/Schyler-Italic.ttf
   #         style: italic
   #   - family: Trajan Pro
   #     fonts:

@@ -14,5 +14,8 @@
     "document-assistant"
   ],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "adm-zip": "^0.5.16"
+  }
 }

@@ -4,11 +4,19 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/services.dart' show rootBundle;
 import 'utils/logger.dart';
+import 'widgets/chat_message_item.dart';
+import 'models/chat_message.dart';
+import 'widgets/file_section.dart';
+import 'package:bitsdojo_window/bitsdojo_window.dart';
+import 'widgets/config_dialog.dart';
+import 'widgets/tooltip_overlay.dart';
+import 'services/api_service.dart';
+import 'package:flutter/gestures.dart';
 
 // 配置管理类
 class Config {
   static String backendUrl = 'http://localhost:2070/'; // 默认值
-  
+
   // 从配置文件加载后端URL
   static Future<void> loadConfig() async {
     try {
@@ -23,30 +31,46 @@ class Config {
 }
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized(); // 确保在加载配置前初始化
-  await Config.loadConfig(); // 加载配置
-  logger.i('应用启动，配置加载完成');
+  // 加载配置
+  WidgetsFlutterBinding.ensureInitialized();
+  await Config.loadConfig();
+
   runApp(const MyApp());
+
+  // 设置窗口属性（仅在桌面平台上有效）
+  doWhenWindowReady(() {
+    final win = appWindow;
+    const initialSize = Size(1024, 768);
+    win.minSize = initialSize;
+    win.size = initialSize;
+    win.alignment = Alignment.center;
+    win.title = "AI智能文档助手";
+    win.show();
+  });
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({Key? key}) : super(key: key);
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'AI Document Assistant',
-      debugShowCheckedModeBanner: false,
+      title: 'AI智能文档助手',
       theme: ThemeData(
-        primarySwatch: Colors.blue,
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        useMaterial3: true,
       ),
       home: const MyHomePage(title: 'AI Document Assistant'),
+      // 优化渲染性能
+      scrollBehavior: const MaterialScrollBehavior().copyWith(
+        dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse},
+      ),
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
-  const MyHomePage({Key? key, required this.title}) : super(key: key);
+  const MyHomePage({super.key, required this.title});
 
   final String title;
 
@@ -55,103 +79,375 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
-  String _backendStatus = '正在检查后端连接...';
-  Color _statusColor = Colors.orange;
+  final List<ChatMessage> _messages = [];
+  final TextEditingController _textController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  final FocusNode _textFieldFocusNode = FocusNode();
+  bool _isLoading = false;
+
+  // 防止重复提交配置的标志位
+  bool _isConfiguring = false;
+
+  // 为每个区域创建 GlobalKey
+  final GlobalKey<FileSectionState> _waitingSectionKey = GlobalKey();
+  final GlobalKey<FileSectionState> _readSectionKey = GlobalKey();
+  final GlobalKey<FileSectionState> _templateSectionKey = GlobalKey();
+  final GlobalKey<FileSectionState> _resultSectionKey = GlobalKey();
+
+  // 存储已上传文档的内容
+  String _currentDocumentContent = '';
 
   @override
   void initState() {
     super.initState();
-    logger.i('初始化页面');
-    _checkBackendConnection();
+    _initConfig().then((_) {
+      // 初始化完成后自动开始新对话
+      _resetChat();
+    });
   }
 
-  // 获取后端API的基础URL - 现在从配置文件获取
-  String getBackendUrl() {
-    return Config.backendUrl;
+  Future<void> _initConfig() async {
+    // 加载配置
+    await Config.loadConfig();
   }
 
-  Future<void> _checkBackendConnection() async {
-    try {
-      // 尝试连接到后端
-      String backendUrl = getBackendUrl();
-      logger.i('尝试连接到后端: $backendUrl');
-      final response = await http.get(
-        Uri.parse(backendUrl), // 后端API地址
-      );
-      
-      if (response.statusCode == 200) {
-        logger.i('后端连接成功');
-        setState(() {
-          _backendStatus = '后端连接: 已连接';
-          _statusColor = Colors.green;
-        });
-      } else {
-        logger.w('后端连接失败，状态码: ${response.statusCode}');
-        setState(() {
-          _backendStatus = '后端连接: 连接失败';
-          _statusColor = Colors.red;
-        });
-      }
-    } catch (e) {
-      logger.e('后端连接异常', e);
+  Future<void> _showConfigDialog() async {
+    // 防止重复点击
+    if (_isConfiguring) return;
+
+    setState(() {
+      _isConfiguring = true;
+    });
+
+    await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return const ConfigDialog();
+      },
+    );
+
+    // 重置配置状态
+    if (mounted) {
       setState(() {
-        _backendStatus = '后端连接: 连接失败';
-        _statusColor = Colors.red;
+        _isConfiguring = false;
       });
     }
   }
 
-  void _incrementCounter() {
-    logger.d('按钮被点击，当前计数: $_counter');
-    setState(() {
-      _counter++;
+  // 滚动到最新消息
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
     });
+  }
+
+  void _resetChat() {
+    setState(() {
+      _messages.clear();
+      _currentDocumentContent = '';
+    });
+
+    // 显示新对话开始的提示消息
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        setState(() {
+          _messages.add(
+            ChatMessage.ai('您好！我是您的AI智能文档助手，有什么我可以帮您的吗？'),
+          );
+        });
+      }
+    });
+  }
+
+  // 发送消息
+  Future<void> _sendMessage(String text) async {
+    if (text.isEmpty) return;
+
+    // 滚动到最新消息
+    _scrollToBottom();
+
+    try {
+      setState(() {
+        _messages.add(ChatMessage.user(text));
+        _textController.clear();
+        _isLoading = true;
+      });
+
+      // 直接调用后端API，让后端处理工具决策和AI响应
+      final response = await _callBackendAPI(text, _currentDocumentContent);
+
+      if (response != null) {
+        setState(() {
+          _messages.add(ChatMessage.ai(response));
+        });
+      }
+    } catch (e, stackTrace) {
+      logger.e('处理消息时发生错误', e, stackTrace);
+      // 添加错误消息到聊天界面
+      if (mounted) {
+        setState(() {
+          _messages.add(ChatMessage.ai('处理您的请求时发生了错误，请稍后重试。'));
+        });
+      }
+    } finally {
+      logger.i('设置加载状态为false');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+      // AI回复后再次滚动到底部
+      _scrollToBottom();
+
+      // 发送消息后焦点回到输入框
+      if (mounted) {
+        FocusScope.of(context).requestFocus(_textFieldFocusNode);
+      }
+    }
+  }
+
+  // 调用后端API
+  Future<String?> _callBackendAPI(String question, String documentText) async {
+    try {
+      // 使用新的带工具决策的API端点
+      final response = await ApiService.chatWithToolDecision(question);
+      
+      if (response != null) {
+        // 检查是否使用了工具
+        final toolUsed = response['toolUsed'] ?? false;
+        final toolInfo = response['toolInfo'];
+        final aiResponse = response['response'];
+        
+        if (toolUsed && toolInfo != null) {
+          logger.i('工具已使用: ${toolInfo['specificToolName']}');
+        } else {
+          logger.i('未使用工具，直接AI回复');
+        }
+        
+        return aiResponse ?? '未收到后端响应';
+      } else {
+        logger.e('API调用失败或返回null');
+        return '后端服务暂时不可用，请稍后重试';
+      }
+    } catch (e) {
+      logger.e('API调用异常', e);
+      return '连接后端服务时发生错误';
+    }
+  }
+
+  // 从后端获取文档内容
+  Future<void> _loadDocumentContent(String filePath) async {
+    try {
+      final content = await ApiService.getDocumentContent(filePath);
+      if (content != null && mounted) {
+        setState(() {
+          _currentDocumentContent = content;
+        });
+        logger.i('成功加载文档内容，长度: ${content.length} 字符');
+      } else {
+        logger.e('无法获取文档内容');
+      }
+    } catch (e) {
+      logger.e('加载文档内容时出错', e);
+    }
+  }
+
+  void _refreshAllSections() {
+    // 调用每个区域的刷新方法
+    [
+      _waitingSectionKey,
+      _readSectionKey,
+      _templateSectionKey,
+      _resultSectionKey,
+    ]
+        .map((key) => key.currentState)
+        .whereType<FileSectionState>()
+        .forEach((state) => state.refreshFiles());
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _textController.dispose();
+    _textFieldFocusNode.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    logger.v('构建页面');
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.title),
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                border: Border.all(color: _statusColor),
-                borderRadius: BorderRadius.circular(5),
-              ),
-              child: Text(
-                _backendStatus,
-                style: TextStyle(
-                  color: _statusColor,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+    return TooltipOverlay(
+      // 使用TooltipOverlay包装整个界面
+      child: Scaffold(
+        appBar: AppBar(
+          backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+          title: Text(widget.title),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _refreshAllSections,
+              tooltip: '刷新',
             ),
-            const SizedBox(height: 30),
-            const Text(
-              'Hello World',
+            IconButton(
+              icon: const Icon(Icons.add),
+              onPressed: _resetChat,
+              tooltip: '新对话',
             ),
-            const Text(
-              'You have pushed the button this many times:',
-            ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+            IconButton(
+              icon: const Icon(Icons.settings),
+              onPressed: _showConfigDialog,
+              tooltip: '配置',
             ),
           ],
         ),
+        body: Container(
+          constraints: const BoxConstraints(minWidth: 1024, minHeight: 768),
+          child: Row(
+            children: [
+              // 左侧四个区域 - 分为上下两排，每排两个区域
+              Expanded(flex: 1, child: _buildLeftPanel()),
+              // 右侧聊天区域
+              Expanded(flex: 1, child: _buildChatPanel()),
+            ],
+          ),
+        ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
+    );
+  }
+
+  Widget _buildLeftPanel() {
+    return Column(
+      children: [
+        // 上排两个区域
+        Expanded(
+          flex: 1,
+          child: Row(
+            children: [
+              Expanded(
+                child: FileSection(
+                  key: _waitingSectionKey,
+                  title: '等待',
+                  onFilesChanged: _refreshAllSections,
+                  onFileOpened: _loadDocumentContent,  // 添加回调
+                ),
+              ),
+              Expanded(
+                child: FileSection(
+                  key: _readSectionKey,
+                  title: '读取',
+                  onFilesChanged: _refreshAllSections,
+                  onFileOpened: _loadDocumentContent,  // 添加回调
+                ),
+              ),
+            ],
+          ),
+        ),
+        // 下排两个区域
+        Expanded(
+          flex: 1,
+          child: Row(
+            children: [
+              Expanded(
+                child: FileSection(
+                  key: _templateSectionKey,
+                  title: '模板',
+                  onFilesChanged: _refreshAllSections,
+                  onFileOpened: _loadDocumentContent,  // 添加回调
+                ),
+              ),
+              Expanded(
+                child: FileSection(
+                  key: _resultSectionKey,
+                  title: '结果',
+                  onFilesChanged: _refreshAllSections,
+                  onFileOpened: _loadDocumentContent,  // 添加回调
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildChatPanel() {
+    return Column(
+      children: [
+        Expanded(
+          child: ListView.builder(
+            controller: _scrollController,
+            itemCount: _messages.length + (_isLoading ? 1 : 0),
+            itemBuilder: (context, index) {
+              if (index >= _messages.length) {
+                return _buildLoadingIndicator();
+              }
+              return ChatMessageItem(message: _messages[index]);
+            },
+          ),
+        ),
+        _buildInputArea(),
+      ],
+    );
+  }
+
+  Widget _buildLoadingIndicator() {
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12.0),
+            decoration: BoxDecoration(
+              color: Colors.blue[50],
+              borderRadius: BorderRadius.circular(8.0),
+              border: Border.all(
+                color: const Color.fromARGB(255, 177, 197, 213),
+                width: 2.0,
+              ),
+            ),
+            child: const Row(
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 5),
+                Text(
+                  'AI正在思考...',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16.0),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInputArea() {
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              focusNode: _textFieldFocusNode,
+              controller: _textController,
+              decoration: const InputDecoration(
+                hintText: '请输入您的问题...',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: _sendMessage,
+            ),
+          ),
+          IconButton(
+            onPressed: () => _sendMessage(_textController.text),
+            icon: const Icon(Icons.send),
+          ),
+        ],
       ),
     );
   }

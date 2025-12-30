@@ -4,3 +4,22 @@
 /.vscode
 .DS_Store
 TODO.md
+
+# 日志文件
+/backend/logs/
+*.log
+
+# 后端环境配置
+/backend/.env
+/backend/.env.local
+/backend/.env.development
+/backend/.env.production
+
+
+# 上传文件目录
+/backend/uploads/
+/backend/temp/
+
+# 数据目录
+/backend/data/
+
